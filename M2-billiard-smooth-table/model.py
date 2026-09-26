@@ -1,9 +1,14 @@
 import numpy as np
 from scipy.integrate import solve_ivp
+from scipy.optimize import OptimizeResult
 
 
-def effective_radius(radius1, radius2):
+def effective_radius(radius1, radius2) -> float:
     return 1 / (1 / radius1 + 1 / radius2)
+
+
+def reduced_mass(m1, m2) -> float:
+    return 1 / (1 / m1 + 1 / m2)
 
 
 def hertz_stiffness(
@@ -21,16 +26,43 @@ def hertz_stiffness(
     return stiffness
 
 
-def contact_force(compression_depth, stiffness, exponent):
+def contact_force(compression_depth, stiffness, exponent) -> float:
     compression_depth = max(compression_depth, 0.0)
     return stiffness * compression_depth ** exponent
+
+
+def max_compression(
+    reduced_mass_value, normal_relative_speed, stiffness, exponent) -> float:
+    power = exponent + 1
+    return (
+        (reduced_mass_value * normal_relative_speed ** 2 * power)
+            / (2 * stiffness)
+        ) ** (1 / power)
+
+
+def contact_timescale(
+    m1: float, m2: float,
+    v1: tuple[float, float], v2: tuple[float, float],
+    stiffness: float, exponent: float, min_relative_speed: float) -> np.float64:
+
+    relative_speed = np.linalg.norm(np.subtract(v1, v2))
+    if relative_speed < min_relative_speed:
+        max_x = np.inf
+    else:
+        max_x = max_compression(
+            reduced_mass(m1, m2),
+            relative_speed,
+            stiffness,
+            exponent)
+    
+    return 2 * max_x / relative_speed
 
 
 def equations_of_motion(
     t,
     y, 
     m1, m2, radius1, radius2,
-    stiffness, compression_exponent, min_separation):
+    stiffness, compression_exponent, min_separation) -> np.ndarray:
 
     r1 = y[0:2]
     v1 = y[2:4]
@@ -62,8 +94,9 @@ def equations_of_motion(
 
 def simulate(
     ball1, ball2, t_span, 
-    compression_exponent, min_separation,
-    solver_method, solver_rtol, solver_atol):
+    compression_exponent,
+    min_separation, min_relative_speed,
+    solver_method, solver_rtol, solver_atol) -> OptimizeResult:
 
     y0 = np.concatenate([
         ball1.position, ball1.velocity,
@@ -74,6 +107,10 @@ def simulate(
         ball1.young_modulus, ball1.poisson_ratio, ball1.radius,
         ball2.young_modulus, ball2.poisson_ratio, ball2.radius
     )
+    max_step = contact_timescale(
+        ball1.mass, ball2.mass,
+        ball1.velocity, ball2.velocity,
+        stiffness, compression_exponent, min_relative_speed)
 
     sol = solve_ivp(
         fun=equations_of_motion,
@@ -86,7 +123,8 @@ def simulate(
         method=solver_method,
         rtol=solver_rtol,
         atol=solver_atol,
-        dense_output=True
+        dense_output=True,
+        max_step=max_step
     )
 
     if not sol.success:
