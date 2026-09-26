@@ -180,3 +180,42 @@ def test_A3_head_on_arbitrary_velocities(v1, v2, mass_ratio):
   assert v1_y == pytest.approx(0.0, abs=1e-6 * abs(v1 - v2))
   assert v2_x == pytest.approx(v2_expected, abs=1e-6 * abs(v1 - v2))
   assert v2_y == pytest.approx(0.0, abs=1e-6 * abs(v1 - v2))
+
+
+
+@pytest.mark.parametrize("mass_ratio", [0.2, 1.0, 5.0])
+@pytest.mark.parametrize("v1, v2", [(0.5, 1.0), (1.0, 1.0)])
+def test_A4_no_collision_when_not_catching_up(v1, v2, mass_ratio):
+
+  assert v1 <= v2
+
+  b1, b2 = close_balls(config.FIRST_BALL, config.SECOND_BALL, 0.0)
+  b1 = replace(b1, velocity=(v1, 0.0))
+  b2 = replace(b2, velocity=(v2, 0.0), density=b2.density * mass_ratio)
+
+  dist_begin = np.hypot(b1.position[0] - b2.position[0], b1.position[1] - b2.position[1])
+
+  tol_d = 1e-9 * GAP
+  tol_v = 1e-6 * max(abs(v1), abs(v2))
+  
+  assert b1.velocity[1] == 0
+
+  sol = run(b1, b2, 0.01)
+
+  x1 = sol.y[0, -1]
+  x2 = sol.y[4, -1]
+  y1 = sol.y[1, -1]
+  y2 = sol.y[5, -1]
+
+  dist_end = np.hypot(x1 - x2, y1 - y2)
+
+  assert dist_end >= dist_begin - tol_d
+  v1_x = sol.y[2, -1]
+  v1_y = sol.y[3, -1]
+  v2_x = sol.y[6, -1]
+  v2_y = sol.y[7, -1]
+
+  assert v1_x == pytest.approx(v1, abs=tol_v)
+  assert v1_y == pytest.approx(0.0, abs=tol_v)
+  assert v2_x == pytest.approx(v2, abs=tol_v)
+  assert v2_y == pytest.approx(0.0, abs=tol_v)
