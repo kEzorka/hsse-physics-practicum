@@ -364,3 +364,58 @@ def test_result_does_not_depend_on_integration_window(t_end):
 
   assert_separated(sol, b1, b2)
   assert ke[-1] == pytest.approx(ke[0], rel=1e-7)
+
+
+
+@pytest.mark.parametrize("mass_ratio", [0.2, 1.0, 5.0])
+@pytest.mark.parametrize("b_fraction", [
+    0.0, 0.25, 0.5,
+    pytest.param(0.75, marks=GRAZING_BUG),
+    pytest.param(0.99, marks=GRAZING_BUG),
+])
+def test_A6_oblique_arbitrary_masses(mass_ratio, b_fraction):
+  v0 = 1.0
+  b1 = replace(config.FIRST_BALL, velocity=(v0, 0.0))
+  b2 = replace(config.SECOND_BALL, velocity=(0.0, 0.0), density=config.SECOND_BALL.density * mass_ratio)
+
+  b = b_fraction * (b1.radius + b2.radius)
+  
+  b1, b2 = close_balls(b1, b2, b)
+
+  sina = b / (b1.radius + b2.radius)
+  cosa = np.sqrt(1 - sina**2)
+
+  A = cosa * (b1.mass - b2.mass) / (b1.mass + b2.mass)
+  B = cosa * 2 * b1.mass / (b1.mass + b2.mass)
+
+  v1_x_expected = v0 * (A * cosa + sina * sina)
+  v1_y_expected = v0 * (A * sina - sina * cosa)
+  v2_x_expected = v0 * B * cosa  
+  v2_y_expected = v0 * B * sina
+
+  t_end = find_t_end(b1, b2)
+
+  sol = run(b1, b2, t_end)
+
+  assert_separated(sol, b1, b2)
+
+  v1_x = sol.y[2, -1]
+  v1_y = sol.y[3, -1]
+  v2_x = sol.y[6, -1]
+  v2_y = sol.y[7, -1]
+
+  # допуск 1e-2: формулы выведены для абсолютно твёрдых шаров,
+  # а в модели шары деформируются, поэтому в момент контакта
+  # расстояние между центрами меньше суммы радиусов на величину сжатия
+  assert v1_x == pytest.approx(v1_x_expected, abs=1e-2 * abs(v0))
+  assert v1_y == pytest.approx(v1_y_expected, abs=1e-2 * abs(v0))
+  assert v2_x == pytest.approx(v2_x_expected, abs=1e-2 * abs(v0))
+  assert v2_y == pytest.approx(v2_y_expected, abs=1e-2 * abs(v0))
+
+  v1 = np.array([v1_x, v1_y])
+  v2 = np.array([v2_x, v2_y])
+
+
+  K_before = (b1.mass * np.dot(b1.velocity, b1.velocity)) / 2 + b2.mass * np.dot(b2.velocity, b2.velocity) / 2
+  K_new = (b1.mass * np.dot(v1, v1)) / 2 + (b2.mass * np.dot(v2, v2)) / 2
+  assert K_before == pytest.approx(K_new, rel=1e-2)
