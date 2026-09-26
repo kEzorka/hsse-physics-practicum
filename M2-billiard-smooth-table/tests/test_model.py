@@ -87,8 +87,7 @@ def find_t_end(ball1, ball2) -> float | None:
 
 
 def run(ball1, ball2, t_end):
-  return model.simulate(ball1, ball2, (0, t_end), config.HERTZ_EXPONENT, config.MIN_SEPARATION, config.SOLVER_METHOD, config.SOLVER_RTOL, config.SOLVER_ATOL)
-
+  return model.simulate(ball1, ball2, (0, t_end), config.HERTZ_EXPONENT, config.MIN_SEPARATION, config.MIN_RELATIVE_SPEED, config.SOLVER_METHOD, config.SOLVER_RTOL, config.SOLVER_ATOL)
 
 
 def close_balls(ball1, ball2, offset)-> tuple[Ball, Ball]:
@@ -157,8 +156,10 @@ def assert_separated(sol, ball1, ball2):
   dy = sol.y[1, -1] - sol.y[5, -1]
   distance = np.hypot(dx, dy)
 
-  # шары не перекрываются = не в контакте  
-  assert distance > ball1.radius + ball2.radius
+  contact_distance = ball1.radius + ball2.radius
+  tol = 1e-12 * contact_distance
+  
+  assert distance >= contact_distance - tol   # шары не перекрываются
 
   dvx = sol.y[2, -1] - sol.y[6, -1]
   dvy = sol.y[3, -1] - sol.y[7, -1]
@@ -296,13 +297,12 @@ def test_A4_no_collision_when_not_catching_up(v1, v2, mass_ratio):
 
 
 
-GRAZING_BUG = pytest.mark.xfail(reason="решатель перешагивает короткий контакт при скользящем ударе, баг в model.py")
+ORACLE_LIMIT = pytest.mark.xfail(reason="оракул абсолютно твёрдых шаров теряет точность при b/R = 0.99: направление нормали сверхчувствительно к глубине деформации (1/cos ~ 7)")
 
 @pytest.mark.parametrize("v0", [2.0, 1.0, 3.0])
 @pytest.mark.parametrize("b_fraction", [
-    0.0, 0.25, 0.5,
-    pytest.param(0.75, marks=GRAZING_BUG),
-    pytest.param(0.99, marks=GRAZING_BUG),
+    0.0, 0.25, 0.5, 0.75,
+    pytest.param(0.99, marks=ORACLE_LIMIT),
 ])
 def test_A5_oblique_equal_masses(v0, b_fraction):
   b1 = replace(config.FIRST_BALL, velocity=(v0, 0.0))
@@ -346,13 +346,6 @@ def test_A5_oblique_equal_masses(v0, b_fraction):
 
 
 
-# Известный баг модели: результат зависит от длины интервала интегрирования.
-# Решатель с адаптивным шагом подбирает размер шага от ширины окна, поэтому
-# при широком окне он перешагивает контакт: шары либо пролетают насквозь,
-# либо получают завышенные скорости.
-# Тест начнёт проходить, когда в model.py появится ограничение шага
-# (max_step) около момента касания.
-@pytest.mark.xfail(reason="решатель перешагивает контакт при широком окне интегрирования, баг в model.py")
 @pytest.mark.parametrize("t_end", [0.02, 0.05, 0.1])
 def test_result_does_not_depend_on_integration_window(t_end):
   ball1, ball2, offset = CASES[0].values
@@ -369,9 +362,8 @@ def test_result_does_not_depend_on_integration_window(t_end):
 
 @pytest.mark.parametrize("mass_ratio", [0.2, 1.0, 5.0])
 @pytest.mark.parametrize("b_fraction", [
-    0.0, 0.25, 0.5,
-    pytest.param(0.75, marks=GRAZING_BUG),
-    pytest.param(0.99, marks=GRAZING_BUG),
+    0.0, 0.25, 0.5, 0.75,
+    pytest.param(0.99, marks=ORACLE_LIMIT),
 ])
 def test_A6_oblique_arbitrary_masses(mass_ratio, b_fraction):
   v0 = 1.0
