@@ -16,7 +16,6 @@ CASES = [
     Ball(position=(0.1, 0.0), velocity=(-1.5, 0.0), radius=0.05, density=7800, young_modulus=2e11, poisson_ratio=0.3),
     0.0,
     id="head-on-collision-with-equal-mass",
-    marks=pytest.mark.xfail(reason="решатель перешагивает контакт, баг в model.py"),
   ),
   pytest.param(
     Ball(position=(0.0, 0.0), velocity=(1.0, 0.0), radius=0.05, density=7800, young_modulus=2e11, poisson_ratio=0.3),
@@ -45,8 +44,51 @@ CASES = [
 ]
 
 
+def time_to_touch(ball1, ball2) -> float | None:
+  d0 = np.array(ball2.position) - np.array(ball1.position)
+  v_rel = np.array(ball2.velocity) - np.array(ball1.velocity)
+
+  a = np.dot(v_rel, v_rel)
+  b = 2 * np.dot(d0, v_rel)
+  c = np.dot(d0, d0) - (ball1.radius + ball2.radius) ** 2
+
+  if a == 0:
+    return None  # шары не сближаются: относительная скорость равна 0
+  
+  discriminant = b**2 - 4*a*c
+  if discriminant < 0:
+    return None  # шары не пересекутся
+
+  t1 = (-b - np.sqrt(discriminant)) / (2*a)
+  t2 = (-b + np.sqrt(discriminant)) / (2*a) 
+
+  if t1 >= 0:
+    return t1
+  elif t2 >= 0:
+    return t2
+  else:
+    return None  # шары не пересекутся
+
+
+
+
+def find_t_end(ball1, ball2) -> float | None:
+  t_touch = time_to_touch(ball1, ball2)
+  if t_touch is None:
+    return None
+
+  # множитель 3 и добавка 0,005 с подобраны эмпирически: нужно досчитать
+  # до касания, пережить контакт и дать шарам разойтись.
+  # После решения B4 заменить на t_touch + время контакта + время разлёта.
+
+  t_end = 3 * t_touch + 0.005
+  return t_end
+
+
+
 def run(ball1, ball2, t_end):
   return model.simulate(ball1, ball2, (0, t_end), config.HERTZ_EXPONENT, config.MIN_SEPARATION, config.SOLVER_METHOD, config.SOLVER_RTOL, config.SOLVER_ATOL)
+
 
 
 def close_balls(ball1, ball2, offset)-> tuple[Ball, Ball]:
@@ -56,21 +98,30 @@ def close_balls(ball1, ball2, offset)-> tuple[Ball, Ball]:
   return b1, b2_close
 
 
+
 @pytest.mark.parametrize("ball1, ball2, offset", CASES)
 def test_collision_happened(ball1, ball2, offset):
   b1, b2 = close_balls(ball1, ball2, offset)
-  sol = run(b1, b2, 0.01)
+
+  t_end = find_t_end(b1, b2)
+
+  sol = run(b1, b2, t_end)
+
   vx_begin = sol.y[2, 0]
   vx_end = sol.y[2, -1]
   v_relative = np.hypot(sol.y[2, 0] - sol.y[6, 0], sol.y[3, 0] - sol.y[7, 0])
+  
   # скорость изменилась больше чем на 1%
   assert abs(vx_begin - vx_end) > 0.01 * abs(v_relative)
+
 
 
 @pytest.mark.parametrize("ball1, ball2, offset", CASES)
 def test_momentum_conserved(ball1, ball2, offset):
   b1, b2 = close_balls(ball1, ball2, offset)
-  sol = run(b1, b2, 0.01)
+
+  t_end = find_t_end(b1, b2)
+  sol = run(b1, b2, t_end)
 
   p_x = b1.mass * sol.y[2, :] + b2.mass * sol.y[6, :]
   p_y = b1.mass * sol.y[3, :] + b2.mass * sol.y[7, :]
@@ -84,10 +135,13 @@ def test_momentum_conserved(ball1, ball2, offset):
   np.testing.assert_allclose(p_y, p_y[0], atol=1e-8 * scale, rtol=0)
 
 
+
 @pytest.mark.parametrize("ball1, ball2, offset", CASES)
 def test_kinetic_energy_conserved(ball1, ball2, offset):
   b1, b2 = close_balls(ball1, ball2, offset)
-  sol = run(b1, b2, 0.01)
+  t_end = find_t_end(b1, b2)
+
+  sol = run(b1, b2, t_end)
 
   ke = 0.5 * b1.mass * (sol.y[2, :]**2 + sol.y[3, :]**2) + 0.5 * b2.mass * (sol.y[6, :]**2 + sol.y[7, :]**2)
 
@@ -95,6 +149,8 @@ def test_kinetic_energy_conserved(ball1, ball2, offset):
 
   # конечная энергия = начальной с точностью до 1e-7
   assert ke[-1] == pytest.approx(ke[0], rel=1e-7) 
+
+
 
 def assert_separated(sol, ball1, ball2):
   dx = sol.y[0, -1] - sol.y[4, -1]
@@ -110,7 +166,8 @@ def assert_separated(sol, ball1, ball2):
 
   # скалярное произведение > 0: шары удаляются друг от друга
   assert dx*dvx + dy*dvy > 0 
-  
+
+
 
 def test_A1_head_on_equal_masses_resting_target():
   b1, b2 = close_balls(config.FIRST_BALL, config.SECOND_BALL, 0.0)
@@ -120,7 +177,8 @@ def test_A1_head_on_equal_masses_resting_target():
   assert b1.mass == b2.mass
   assert b1.velocity[1] == 0
 
-  sol = run(b1, b2, 0.01)
+  t_end = find_t_end(b1, b2)
+  sol = run(b1, b2, t_end)
 
   assert_separated(sol, b1, b2)
 
@@ -134,6 +192,7 @@ def test_A1_head_on_equal_masses_resting_target():
   assert sol.y[7, -1] == pytest.approx(0.0, abs=1e-6 * abs(v0))
 
 
+
 @pytest.mark.parametrize("mass_ratio", [0.2, 0.5, 1.0, 2.0, 5.0])
 def test_A2_head_on_arbitrary_masses(mass_ratio):
   b1, b2 = close_balls(config.FIRST_BALL, config.SECOND_BALL, 0.0)
@@ -142,7 +201,8 @@ def test_A2_head_on_arbitrary_masses(mass_ratio):
 
   assert b1.velocity[1] == 0
 
-  sol = run(b1, b2, 0.01)
+  t_end = find_t_end(b1, b2)
+  sol = run(b1, b2, t_end)
 
   assert_separated(sol, b1, b2)
 
@@ -171,7 +231,8 @@ def test_A3_head_on_arbitrary_velocities(v1, v2, mass_ratio):
 
   assert b1.velocity[1] == 0
 
-  sol = run(b1, b2, 0.01)
+  t_end = find_t_end(b1, b2)
+  sol = run(b1, b2, t_end)
 
   assert_separated(sol, b1, b2)
 
@@ -208,6 +269,11 @@ def test_A4_no_collision_when_not_catching_up(v1, v2, mass_ratio):
   
   assert b1.velocity[1] == 0
 
+  t_end = find_t_end(b1, b2)
+
+  assert t_end is None
+
+  # Касания нет, поэтому время берётся произвольным, лишь бы хватило убедиться, что шары не сближаются.
   sol = run(b1, b2, 0.01)
 
   x1 = sol.y[0, -1]
@@ -227,6 +293,7 @@ def test_A4_no_collision_when_not_catching_up(v1, v2, mass_ratio):
   assert v1_y == pytest.approx(0.0, abs=tol_v)
   assert v2_x == pytest.approx(v2, abs=tol_v)
   assert v2_y == pytest.approx(0.0, abs=tol_v)
+
 
 
 GRAZING_BUG = pytest.mark.xfail(reason="решатель перешагивает короткий контакт при скользящем ударе, баг в model.py")
@@ -255,10 +322,7 @@ def test_A5_oblique_equal_masses(v0, b_fraction):
   v2_x_expected = v0 * cosa * cosa  
   v2_y_expected = v0 * cosa * sina
 
-  R = b1.radius + b2.radius
-  x_gap = b2.position[0] - b1.position[0] # расстояние по x в начале
-  t_contact = (x_gap - np.sqrt(R**2 - b**2)) / v0
-  t_end = 3 * t_contact + 0.005
+  t_end = find_t_end(b1, b2)
 
   sol = run(b1, b2, t_end)
 
@@ -279,3 +343,24 @@ def test_A5_oblique_equal_masses(v0, b_fraction):
 
   # скалярное произведение = 0
   assert v1_x * v2_x + v1_y * v2_y == pytest.approx(0.0, abs=1e-6 * abs(v0)**2) 
+
+
+
+# Известный баг модели: результат зависит от длины интервала интегрирования.
+# Решатель с адаптивным шагом подбирает размер шага от ширины окна, поэтому
+# при широком окне он перешагивает контакт: шары либо пролетают насквозь,
+# либо получают завышенные скорости.
+# Тест начнёт проходить, когда в model.py появится ограничение шага
+# (max_step) около момента касания.
+@pytest.mark.xfail(reason="решатель перешагивает контакт при широком окне интегрирования, баг в model.py")
+@pytest.mark.parametrize("t_end", [0.02, 0.05, 0.1])
+def test_result_does_not_depend_on_integration_window(t_end):
+  ball1, ball2, offset = CASES[0].values
+  b1, b2 = close_balls(ball1, ball2, offset)
+
+  sol = run(b1, b2, t_end)
+
+  ke = 0.5 * b1.mass * (sol.y[2, :]**2 + sol.y[3, :]**2) + 0.5 * b2.mass * (sol.y[6, :]**2 + sol.y[7, :]**2)
+
+  assert_separated(sol, b1, b2)
+  assert ke[-1] == pytest.approx(ke[0], rel=1e-7)
