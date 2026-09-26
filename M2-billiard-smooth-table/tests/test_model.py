@@ -151,6 +151,28 @@ def test_kinetic_energy_conserved(ball1, ball2, offset):
 
 
 
+@pytest.mark.parametrize("ball1, ball2, offset", CASES)
+def test_energy_of_the_system_conserved(ball1, ball2, offset):
+  b1, b2 = close_balls(ball1, ball2, offset)
+  t_end = find_t_end(b1, b2)
+
+  sol = run(b1, b2, t_end)
+
+  delta = b1.radius + b2.radius - np.hypot(sol.y[4, :] - sol.y[0, :], sol.y[5, :] - sol.y[1, :])
+
+  delta = np.maximum(delta, 0)  # сжатие не может быть отрицательным
+
+  k = model.hertz_stiffness(b1.young_modulus, b1.poisson_ratio, b1.radius, b2.young_modulus, b2.poisson_ratio, b2.radius)
+
+  pe = 2 / 5 * k * delta**(5/2)  # потенциальная энергия сжатия
+  ke = 0.5 * b1.mass * (sol.y[2, :]**2 + sol.y[3, :]**2) + 0.5 * b2.mass * (sol.y[6, :]**2 + sol.y[7, :]**2)
+
+  assert_separated(sol, b1, b2)
+  
+  np.testing.assert_allclose(pe + ke, pe[0] + ke[0], rtol=1e-7, atol=1e-12 * abs(pe[0] + ke[0]))  # энергия системы сохраняется
+
+
+
 def assert_separated(sol, ball1, ball2):
   dx = sol.y[0, -1] - sol.y[4, -1]
   dy = sol.y[1, -1] - sol.y[5, -1]
@@ -158,7 +180,7 @@ def assert_separated(sol, ball1, ball2):
 
   contact_distance = ball1.radius + ball2.radius
   tol = 1e-12 * contact_distance
-  
+
   assert distance >= contact_distance - tol   # шары не перекрываются
 
   dvx = sol.y[2, -1] - sol.y[6, -1]
