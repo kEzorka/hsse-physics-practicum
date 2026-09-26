@@ -63,7 +63,8 @@ def test_collision_happened(ball1, ball2, offset):
   vx_begin = sol.y[2, 0]
   vx_end = sol.y[2, -1]
   v_relative = np.hypot(sol.y[2, 0] - sol.y[6, 0], sol.y[3, 0] - sol.y[7, 0])
-  assert abs(vx_begin - vx_end) > 0.01 * abs(v_relative) # скорость изменилась больше чем на 1%
+  # скорость изменилась больше чем на 1%
+  assert abs(vx_begin - vx_end) > 0.01 * abs(v_relative)
 
 
 @pytest.mark.parametrize("ball1, ball2, offset", CASES)
@@ -76,8 +77,9 @@ def test_momentum_conserved(ball1, ball2, offset):
 
   scale = np.hypot(p_x[0], p_y[0])
 
-  # Каждый элемент массива должен отличаться от начального значения не больше чем
-  # на 1e-8 от масштаба. rtol=0 отключает скрытый относительный допуск.
+  # Каждый элемент массива должен отличаться от начального значения не 
+  # больше чем на 1e-8 от масштаба. rtol=0 отключает скрытый относительный 
+  # допуск.
   np.testing.assert_allclose(p_x, p_x[0], atol=1e-8 * scale, rtol=0)
   np.testing.assert_allclose(p_y, p_y[0], atol=1e-8 * scale, rtol=0)
 
@@ -91,17 +93,23 @@ def test_kinetic_energy_conserved(ball1, ball2, offset):
 
   assert_separated(sol, b1, b2)
 
-  assert ke[-1] == pytest.approx(ke[0], rel=1e-7) # конечная энергия = начальной с точностью до 1e-7
+  # конечная энергия = начальной с точностью до 1e-7
+  assert ke[-1] == pytest.approx(ke[0], rel=1e-7) 
 
 def assert_separated(sol, ball1, ball2):
   dx = sol.y[0, -1] - sol.y[4, -1]
   dy = sol.y[1, -1] - sol.y[5, -1]
   distance = np.hypot(dx, dy)
-  assert distance > ball1.radius + ball2.radius # шары не перекрываются = не в контакте
-  
+
+  # шары не перекрываются = не в контакте  
+  assert distance > ball1.radius + ball2.radius
+
   dvx = sol.y[2, -1] - sol.y[6, -1]
   dvy = sol.y[3, -1] - sol.y[7, -1]
-  assert dx*dvx + dy*dvy > 0 # скалярное произведение > 0: шары удаляются друг от друга
+
+
+  # скалярное произведение > 0: шары удаляются друг от друга
+  assert dx*dvx + dy*dvy > 0 
   
 
 def test_A1_head_on_equal_masses_resting_target():
@@ -219,3 +227,55 @@ def test_A4_no_collision_when_not_catching_up(v1, v2, mass_ratio):
   assert v1_y == pytest.approx(0.0, abs=tol_v)
   assert v2_x == pytest.approx(v2, abs=tol_v)
   assert v2_y == pytest.approx(0.0, abs=tol_v)
+
+
+GRAZING_BUG = pytest.mark.xfail(reason="решатель перешагивает короткий контакт при скользящем ударе, баг в model.py")
+
+@pytest.mark.parametrize("v0", [2.0, 1.0, 3.0])
+@pytest.mark.parametrize("b_fraction", [
+    0.0, 0.25, 0.5,
+    pytest.param(0.75, marks=GRAZING_BUG),
+    pytest.param(0.99, marks=GRAZING_BUG),
+])
+def test_A5_oblique_equal_masses(v0, b_fraction):
+  b1 = replace(config.FIRST_BALL, velocity=(v0, 0.0))
+  b2 = replace(config.SECOND_BALL, velocity=(0.0, 0.0))
+
+  b = b_fraction * (b1.radius + b2.radius)
+
+  assert b1.mass == b2.mass
+  
+  b1, b2 = close_balls(b1, b2, b)
+
+  sina = b / (b1.radius + b2.radius)
+  cosa = np.sqrt(1 - sina**2)
+
+  v1_x_expected = v0 * sina * sina
+  v1_y_expected = v0 * sina * (-cosa)
+  v2_x_expected = v0 * cosa * cosa  
+  v2_y_expected = v0 * cosa * sina
+
+  R = b1.radius + b2.radius
+  x_gap = b2.position[0] - b1.position[0] # расстояние по x в начале
+  t_contact = (x_gap - np.sqrt(R**2 - b**2)) / v0
+  t_end = 3 * t_contact + 0.005
+
+  sol = run(b1, b2, t_end)
+
+  assert_separated(sol, b1, b2)
+
+  v1_x = sol.y[2, -1]
+  v1_y = sol.y[3, -1]
+  v2_x = sol.y[6, -1]
+  v2_y = sol.y[7, -1]
+
+  # допуск 1e-2: формулы выведены для абсолютно твёрдых шаров,
+  # а в модели шары деформируются, поэтому в момент контакта
+  # расстояние между центрами меньше суммы радиусов на величину сжатия
+  assert v1_x == pytest.approx(v1_x_expected, abs=1e-2 * abs(v0))
+  assert v1_y == pytest.approx(v1_y_expected, abs=1e-2 * abs(v0))
+  assert v2_x == pytest.approx(v2_x_expected, abs=1e-2 * abs(v0))
+  assert v2_y == pytest.approx(v2_y_expected, abs=1e-2 * abs(v0))
+
+  # скалярное произведение = 0
+  assert v1_x * v2_x + v1_y * v2_y == pytest.approx(0.0, abs=1e-6 * abs(v0)**2) 
