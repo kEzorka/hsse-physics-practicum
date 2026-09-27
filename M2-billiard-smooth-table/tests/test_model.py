@@ -463,3 +463,54 @@ def test_B0_rigid_wall_limit():
   k_wall = model.hertz_stiffness(young_modulus, 0.0, radius, 1e30, 0.0, 1e30)
   
   assert k_almost == pytest.approx(k_wall, rel=1e-5)
+
+
+
+ADDITION_RULE_LIMIT = pytest.mark.xfail(reason="правило сложения податливостей точно выполняется только при одинаковых материалах: в формуле Герца эффективный модуль Юнга и эффективный радиус входят по-разному, для шаров из разных материалов расхождение около 15%")
+@ADDITION_RULE_LIMIT
+def test_B0_stiffness_addition_rule():
+  # два шара одинакового радиуса, но из разных материалов
+  radius = 0.05
+  young_modulus1 = 2e11
+  young_modulus2 = 1e10
+
+  k = model.hertz_stiffness(young_modulus1, 0.0, radius, young_modulus2, 0.0, radius)
+  k1 = model.hertz_stiffness(young_modulus1, 0.0, radius, 1e30, 0.0, 1e30)
+  k2 = model.hertz_stiffness(1e30, 0.0, 1e30, young_modulus2, 0.0, radius)
+
+  assert k**(-2/3) == pytest.approx(k1**(-2/3) + k2**(-2/3), rel=1e-12)
+
+
+
+def measure_contact_time(sol, ball1, ball2):
+  # перекрытие
+  delta = ball1.radius + ball2.radius - np.hypot(sol.y[4, :] - sol.y[0, :], sol.y[5, :] - sol.y[1, :])
+  delta = np.maximum(delta, 0)
+  
+  if np.sum(delta > 0) == 0:
+    return 0.0 # контакта не было
+  else:
+    # время между первым и последним моментом с ненулевым перекрытием
+    return sol.t[delta > 0][-1] - sol.t[delta > 0][0]
+  
+
+
+
+def contact_time_at_speed(v0):
+  b1 = replace(config.FIRST_BALL, velocity=(v0, 0.0))
+  b2 = replace(config.SECOND_BALL, velocity=(0.0, 0.0))
+  b1, b2 = close_balls(b1, b2, 0.0)
+  sol = run(b1, b2, find_t_end(b1, b2))
+  return measure_contact_time(sol, b1, b2)
+
+
+# t ~ v^(-1/5): у Герца жёсткость растёт с вдавливанием, быстрый удар короче.
+# Сравниваем отношение времён — так тест не зависит от коэффициента.
+@pytest.mark.parametrize("v_slow, v_fast", [(0.5, 1.0), (1.0, 2.0), (1.0, 4.0), (0.5, 4.0)])
+def test_B4_contact_time_scaling(v_slow, v_fast):
+  t_slow = contact_time_at_speed(v_slow)
+  t_fast = contact_time_at_speed(v_fast)
+
+  assert t_slow > 0 and t_fast > 0 # контакт был в обоих расчётах
+
+  assert t_slow / t_fast == pytest.approx((v_fast / v_slow)**(1/5), rel=1e-3)
