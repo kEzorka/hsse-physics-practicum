@@ -321,12 +321,15 @@ def test_A4_no_collision_when_not_catching_up(v1, v2, mass_ratio):
 
 ORACLE_LIMIT = pytest.mark.xfail(reason="оракул абсолютно твёрдых шаров теряет точность при b/R = 0.99: направление нормали сверхчувствительно к глубине деформации (1/cos ~ 7)")
 
-@pytest.mark.parametrize("v0", [2.0, 1.0, 3.0])
-@pytest.mark.parametrize("b_fraction", [
-    0.0, 0.25, 0.5, 0.75,
-    pytest.param(0.99, marks=ORACLE_LIMIT),
+@pytest.mark.parametrize("b_fraction, v0", [
+    (0.0, 1.0), (0.0, 2.0), (0.0, 3.0),
+    (0.25, 1.0), (0.25, 2.0), (0.25, 3.0),
+    (0.5, 1.0), (0.5, 2.0), (0.5, 3.0),
+    (0.75, 1.0), (0.75, 2.0), (0.75, 3.0),
+    (0.99, 1.0), (0.99, 2.0),
+    pytest.param(0.99, 3.0, marks=ORACLE_LIMIT),
 ])
-def test_A5_oblique_equal_masses(v0, b_fraction):
+def test_A5_oblique_equal_masses(b_fraction, v0):
   b1 = replace(config.FIRST_BALL, velocity=(v0, 0.0))
   b2 = replace(config.SECOND_BALL, velocity=(0.0, 0.0))
 
@@ -382,12 +385,15 @@ def test_result_does_not_depend_on_integration_window(t_end):
 
 
 
-@pytest.mark.parametrize("mass_ratio", [0.2, 1.0, 5.0])
-@pytest.mark.parametrize("b_fraction", [
-    0.0, 0.25, 0.5, 0.75,
-    pytest.param(0.99, marks=ORACLE_LIMIT),
+@pytest.mark.parametrize("b_fraction, mass_ratio", [
+    (0.0, 0.2), (0.0, 1.0), (0.0, 5.0),
+    (0.25, 0.2), (0.25, 1.0), (0.25, 5.0),
+    (0.5, 0.2), (0.5, 1.0), (0.5, 5.0),
+    (0.75, 0.2), (0.75, 1.0), (0.75, 5.0),
+    (0.99, 0.2), (0.99, 1.0),
+    pytest.param(0.99, 5.0, marks=ORACLE_LIMIT),
 ])
-def test_A6_oblique_arbitrary_masses(mass_ratio, b_fraction):
+def test_A6_oblique_arbitrary_masses(b_fraction, mass_ratio):
   v0 = 1.0
   b1 = replace(config.FIRST_BALL, velocity=(v0, 0.0))
   b2 = replace(config.SECOND_BALL, velocity=(0.0, 0.0), density=config.SECOND_BALL.density * mass_ratio)
