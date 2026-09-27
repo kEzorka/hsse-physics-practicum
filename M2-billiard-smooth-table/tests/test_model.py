@@ -321,12 +321,15 @@ def test_A4_no_collision_when_not_catching_up(v1, v2, mass_ratio):
 
 ORACLE_LIMIT = pytest.mark.xfail(reason="оракул абсолютно твёрдых шаров теряет точность при b/R = 0.99: направление нормали сверхчувствительно к глубине деформации (1/cos ~ 7)")
 
-@pytest.mark.parametrize("v0", [2.0, 1.0, 3.0])
-@pytest.mark.parametrize("b_fraction", [
-    0.0, 0.25, 0.5, 0.75,
-    pytest.param(0.99, marks=ORACLE_LIMIT),
+@pytest.mark.parametrize("b_fraction, v0", [
+    (0.0, 1.0), (0.0, 2.0), (0.0, 3.0),
+    (0.25, 1.0), (0.25, 2.0), (0.25, 3.0),
+    (0.5, 1.0), (0.5, 2.0), (0.5, 3.0),
+    (0.75, 1.0), (0.75, 2.0), (0.75, 3.0),
+    (0.99, 1.0), (0.99, 2.0),
+    pytest.param(0.99, 3.0, marks=ORACLE_LIMIT),
 ])
-def test_A5_oblique_equal_masses(v0, b_fraction):
+def test_A5_oblique_equal_masses(b_fraction, v0):
   b1 = replace(config.FIRST_BALL, velocity=(v0, 0.0))
   b2 = replace(config.SECOND_BALL, velocity=(0.0, 0.0))
 
@@ -382,12 +385,15 @@ def test_result_does_not_depend_on_integration_window(t_end):
 
 
 
-@pytest.mark.parametrize("mass_ratio", [0.2, 1.0, 5.0])
-@pytest.mark.parametrize("b_fraction", [
-    0.0, 0.25, 0.5, 0.75,
-    pytest.param(0.99, marks=ORACLE_LIMIT),
+@pytest.mark.parametrize("b_fraction, mass_ratio", [
+    (0.0, 0.2), (0.0, 1.0), (0.0, 5.0),
+    (0.25, 0.2), (0.25, 1.0), (0.25, 5.0),
+    (0.5, 0.2), (0.5, 1.0), (0.5, 5.0),
+    (0.75, 0.2), (0.75, 1.0), (0.75, 5.0),
+    (0.99, 0.2), (0.99, 1.0),
+    pytest.param(0.99, 5.0, marks=ORACLE_LIMIT),
 ])
-def test_A6_oblique_arbitrary_masses(mass_ratio, b_fraction):
+def test_A6_oblique_arbitrary_masses(b_fraction, mass_ratio):
   v0 = 1.0
   b1 = replace(config.FIRST_BALL, velocity=(v0, 0.0))
   b2 = replace(config.SECOND_BALL, velocity=(0.0, 0.0), density=config.SECOND_BALL.density * mass_ratio)
@@ -433,3 +439,78 @@ def test_A6_oblique_arbitrary_masses(mass_ratio, b_fraction):
   K_before = (b1.mass * np.dot(b1.velocity, b1.velocity)) / 2 + b2.mass * np.dot(b2.velocity, b2.velocity) / 2
   K_new = (b1.mass * np.dot(v1, v1)) / 2 + (b2.mass * np.dot(v2, v2)) / 2
   assert K_before == pytest.approx(K_new, rel=1e-2)
+
+
+
+def test_B0_stiffness_of_pair_of_equal_balls():
+  radius = 0.05
+  young_modulus = 2e11
+
+  k = model.hertz_stiffness(young_modulus, 0.0, radius, young_modulus, 0.0, radius)
+  k0 = model.hertz_stiffness(young_modulus, 0.0, radius, 1e30, 0.0, 1e30)
+  
+  assert k == pytest.approx(k0 / 2**1.5, rel=1e-12)
+
+
+
+def test_B0_rigid_wall_limit():
+  # предел k2 -> inf: очень жёсткий второй шар даёт ту же жёсткость,
+  # что и абсолютно жёсткая стенка
+  radius = 0.05
+  young_modulus = 2e11
+
+  k_almost = model.hertz_stiffness(young_modulus, 0.0, radius, 1e6 * young_modulus, 0.0, 1e30)
+  k_wall = model.hertz_stiffness(young_modulus, 0.0, radius, 1e30, 0.0, 1e30)
+  
+  assert k_almost == pytest.approx(k_wall, rel=1e-5)
+
+
+
+ADDITION_RULE_LIMIT = pytest.mark.xfail(reason="правило сложения податливостей точно выполняется только при одинаковых материалах: в формуле Герца эффективный модуль Юнга и эффективный радиус входят по-разному, для шаров из разных материалов расхождение около 15%")
+@ADDITION_RULE_LIMIT
+def test_B0_stiffness_addition_rule():
+  # два шара одинакового радиуса, но из разных материалов
+  radius = 0.05
+  young_modulus1 = 2e11
+  young_modulus2 = 1e10
+
+  k = model.hertz_stiffness(young_modulus1, 0.0, radius, young_modulus2, 0.0, radius)
+  k1 = model.hertz_stiffness(young_modulus1, 0.0, radius, 1e30, 0.0, 1e30)
+  k2 = model.hertz_stiffness(1e30, 0.0, 1e30, young_modulus2, 0.0, radius)
+
+  assert k**(-2/3) == pytest.approx(k1**(-2/3) + k2**(-2/3), rel=1e-12)
+
+
+
+def measure_contact_time(sol, ball1, ball2):
+  # перекрытие
+  delta = ball1.radius + ball2.radius - np.hypot(sol.y[4, :] - sol.y[0, :], sol.y[5, :] - sol.y[1, :])
+  delta = np.maximum(delta, 0)
+  
+  if np.sum(delta > 0) == 0:
+    return 0.0 # контакта не было
+  else:
+    # время между первым и последним моментом с ненулевым перекрытием
+    return sol.t[delta > 0][-1] - sol.t[delta > 0][0]
+  
+
+
+
+def contact_time_at_speed(v0):
+  b1 = replace(config.FIRST_BALL, velocity=(v0, 0.0))
+  b2 = replace(config.SECOND_BALL, velocity=(0.0, 0.0))
+  b1, b2 = close_balls(b1, b2, 0.0)
+  sol = run(b1, b2, find_t_end(b1, b2))
+  return measure_contact_time(sol, b1, b2)
+
+
+# t ~ v^(-1/5): у Герца жёсткость растёт с вдавливанием, быстрый удар короче.
+# Сравниваем отношение времён — так тест не зависит от коэффициента.
+@pytest.mark.parametrize("v_slow, v_fast", [(0.5, 1.0), (1.0, 2.0), (1.0, 4.0), (0.5, 4.0)])
+def test_B4_contact_time_scaling(v_slow, v_fast):
+  t_slow = contact_time_at_speed(v_slow)
+  t_fast = contact_time_at_speed(v_fast)
+
+  assert t_slow > 0 and t_fast > 0 # контакт был в обоих расчётах
+
+  assert t_slow / t_fast == pytest.approx((v_fast / v_slow)**(1/5), rel=1e-3)
