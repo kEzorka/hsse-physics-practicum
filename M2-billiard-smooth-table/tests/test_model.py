@@ -433,3 +433,27 @@ def test_A6_oblique_arbitrary_masses(mass_ratio, b_fraction):
   K_before = (b1.mass * np.dot(b1.velocity, b1.velocity)) / 2 + b2.mass * np.dot(b2.velocity, b2.velocity) / 2
   K_new = (b1.mass * np.dot(v1, v1)) / 2 + (b2.mass * np.dot(v2, v2)) / 2
   assert K_before == pytest.approx(K_new, rel=1e-2)
+
+
+
+def test_B0_stiffness_of_pair_of_equal_balls():
+  radius = 0.05
+  young_modulus = 2e11
+
+  k = model.hertz_stiffness(young_modulus, 0.0, radius, young_modulus, 0.0, radius)
+  k0 = model.hertz_stiffness(young_modulus, 0.0, radius, 1e30, 0.0, 1e30)
+  
+  assert k == pytest.approx(k0 / 2**1.5, rel=1e-12)
+
+
+
+def test_B0_rigid_wall_limit():
+  # предел k2 -> inf: очень жёсткий второй шар даёт ту же жёсткость,
+  # что и абсолютно жёсткая стенка
+  radius = 0.05
+  young_modulus = 2e11
+
+  k_almost = model.hertz_stiffness(young_modulus, 0.0, radius, 1e6 * young_modulus, 0.0, 1e30)
+  k_wall = model.hertz_stiffness(young_modulus, 0.0, radius, 1e30, 0.0, 1e30)
+  
+  assert k_almost == pytest.approx(k_wall, rel=1e-5)
